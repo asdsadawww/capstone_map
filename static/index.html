@@ -123,6 +123,7 @@
 
     <div class="filter-row">
       <div class="chips" id="categoryChips">
+        <button class="btn" style="background:#ef4444; color:#fff;" onclick="findNearestFacility()">🚨 가까운 시설</button>
         <button class="chip active" data-cat="ALL" onclick="selectCategory(this)">전체</button>
         <button class="chip" data-cat="공중화장실" onclick="selectCategory(this)">공중화장실</button>
         <button class="chip" data-cat="AED" onclick="selectCategory(this)">AED</button>
@@ -154,6 +155,16 @@
       <button class="close-btn" onclick="closeDetail()">✕</button>
     </div>
     <div class="detail-addr" id="dAddress">주소 정보</div>
+
+    <!-- 이동수단 선택 및 단계별 경로 안내 박스 -->
+    <div id="routeGuideBox" style="display:none; flex-direction:column; gap:6px; background:#f8fafc; padding:10px; border-radius:8px; border:1px solid #e2e8f0;">
+      <div style="display:grid; grid-template-columns:repeat(3,1fr); gap:4px;">
+        <button class="btn btn-outline mode-btn" data-mode="walk" onclick="switchRouteMode('walk')">🚶 도보</button>
+        <button class="btn btn-outline mode-btn" data-mode="transit" onclick="switchRouteMode('transit')">🚌 대중교통</button>
+        <button class="btn btn-outline mode-btn" data-mode="car" onclick="switchRouteMode('car')">🚗 차량</button>
+      </div>
+      <div id="routeSteps" style="max-height:110px; overflow-y:auto; font-size:12px; color:#334155; line-height:1.5;"></div>
+    </div>
     <div class="detail-coord" id="dCoord">위도, 경도</div>
 
     <div>
@@ -414,6 +425,118 @@
       } else {
         alert("등록 실패");
       }
+    }
+    let routePolyline = null;
+    let myLocationOverlay = null;
+    let gpsWatchId = null;
+    let lastMyCoords = null;
+    let lastTargetCategory = null;
+
+    function startLiveGpsTracking() {
+      if (gpsWatchId !== null || !navigator.geolocation) return;
+      gpsWatchId = navigator.geolocation.watchPosition((pos) => {
+        const latlng = new kakao.maps.LatLng(pos.coords.latitude, pos.coords.longitude);
+        lastMyCoords = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+
+        if (!myLocationOverlay) {
+          const dot = document.createElement("div");
+          dot.style.cssText = "width:14px;height:14px;background:#2563eb;border:3px solid #fff;border-radius:50%;box-shadow:0 0 8px rgba(37,99,235,0.8);";
+          myLocationOverlay = new kakao.maps.CustomOverlay({ map: map, position: latlng, content: dot });
+        } else {
+          myLocationOverlay.setPosition(latlng);
+        }
+      }, null, { enableHighAccuracy: true });
+    }
+
+    async function findNearestFacility(forcedCategory = null, routeMode = "auto") {
+      let targetCat = forcedCategory || currentCategory;
+      if (targetCat === "ALL") {
+        const choice = prompt("찾을 시설 번호를 입력하세요:\n1. 공중화장실  2. AED  3. 졸음쉼터  4. 한파쉼터  5. 무더위쉼터", "1");
+        const mapCat = { "1": "공중화장실", "2": "AED", "3": "졸음쉼터", "4": "한파쉼터", "5": "무더위쉼터" };
+        targetCat = mapCat[choice];
+        if (!targetCat) return;
+      }
+
+      if (!navigator.geolocation) return alert("위치 정보를 지원하지 않는 브라우저입니다.");
+      lastTargetCategory = targetCat;
+      startLiveGpsTracking();
+
+      document.getElementById("countBadge").innerText = `가장 가까운 ${targetCat} 탐색 중...`;
+
+      navigator.geolocation.getCurrentPosition(async (pos) => {
+        lastMyCoords = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+        await requestAndRenderRoute(targetCat, lastMyCoords.lat, lastMyCoords.lng, routeMode);
+      }, () => {
+        alert("현재 위치 권한을 허용해 주세요.");
+        fetchLocations();
+      });
+    }
+
+    async function switchRouteMode(newMode) {
+      if (!lastMyCoords || !lastTargetCategory) return;
+      await requestAndRenderRoute(lastTargetCategory, lastMyCoords.lat, lastMyCoords.lng, newMode);
+    }
+
+    async function requestAndRenderRoute(targetCat, myLat, myLng, routeMode) {
+      const res = await fetch(
+        `/api/nearest?category=${encodeURIComponent(targetCat)}&lat=${myLat}&lng=${myLng}&mode=${routeMode}`
+      );
+      if (!res.ok) {
+        const err = await res.json();
+        alert(err.detail || "주변 시설을 찾지 못했습니다.");
+        fetchLocations();
+        return;
+      }
+
+      const result = await res.json();
+
+      // 경로선 색상 분기 (차량: 파랑, 대중교통: 초록, 도보: 빨강)
+      if (routePolyline) routePolyline.setMap(null);
+      const colorMap = { car: "#2563eb", transit: "#16a34a", walk: "#ef4444" };
+      const linePath = result.path.map(p => new kakao.maps.LatLng(p.lat, p.lng));
+
+      routePolyline = new kakao.maps.Polyline({
+        path: linePath,
+        strokeWeight: 6,
+        strokeColor: colorMap[result.mode] || "#ef4444",
+        strokeOpacity: 0.9,
+        strokeStyle: result.is_fallback ? "shortdash" : "solid"
+      });
+      routePolyline.setMap(map);
+
+      const bounds = new kakao.maps.LatLngBounds();
+      linePath.forEach(latlng => bounds.extend(latlng));
+      map.setBounds(bounds);
+
+      const minutes = Math.max(1, Math.round(result.duration / 60));
+      const distText = result.distance >= 1000
+        ? `${(result.distance / 1000).toFixed(1)}km`
+        : `${result.distance}m`;
+      const modeNames = { car: "차량", transit: "대중교통", walk: "도보" };
+      const kakaoModes = { car: "car", transit: "traffic", walk: "walk" };
+
+      openDetail(result.target);
+      document.getElementById("dAddress").innerText =
+        `🚨 최단 ${modeNames[result.mode]} ${distText} (약 ${minutes}분) · ${result.target.address}`;
+
+      // 이동수단 탭 활성화 및 턴바이턴 안내 문구 표시
+      const guideBox = document.getElementById("routeGuideBox");
+      guideBox.style.display = "flex";
+      document.querySelectorAll(".mode-btn").forEach(btn => {
+        const isActive = btn.dataset.mode === result.mode;
+        btn.style.background = isActive ? "#1e293b" : "#f1f5f9";
+        btn.style.color = isActive ? "#fff" : "#334155";
+      });
+
+      const stepsEl = document.getElementById("routeSteps");
+      stepsEl.innerHTML = (result.steps && result.steps.length > 0)
+        ? result.steps.map((s, idx) => `<div>${idx + 1}. ${s}</div>`).join("")
+        : "<div>목적지까지 직진 이동</div>";
+
+      // 카카오맵 외부 길찾기 링크 (도보/대중교통/차량 자동 전환)
+      document.getElementById("dNaviLink").innerText = `카카오맵 ${modeNames[result.mode]} 안내`;
+      document.getElementById("dNaviLink").href =
+        `https://map.kakao.com/link/by/${kakaoModes[result.mode]}/현재위치,${myLat},${myLng}/${encodeURIComponent(result.target.name)},${result.target.lat},${result.target.lng}`;
     }
   </script>
 </body>
