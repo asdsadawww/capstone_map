@@ -1,0 +1,30 @@
+name: 공공데이터 주기적 DB 동기화
+
+on:
+  schedule:
+    # 매주 월요일 새벽 3시 (한국시간 기준, UTC 일요일 18:00) 자동 실행
+    - cron: "0 18 * * 0"
+  # GitHub 웹사이트에서 필요할 때마다 버튼으로 수동 실행도 가능
+  workflow_dispatch:
+
+jobs:
+  sync-public-data:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 저장소 코드 가져오기
+        uses: actions/checkout@v4
+
+      - name: Python 설정
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: 필수 패키지 설치
+        run: pip install requests pymysql cryptography
+
+      - name: 공공데이터 동기화 스크립트 실행
+        env:
+          DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+          PUBLIC_DATA_KEY: ${{ secrets.PUBLIC_DATA_KEY }}
+          KAKAO_REST_KEY: ${{ secrets.KAKAO_REST_KEY }}
+        run: python sync_data.py
