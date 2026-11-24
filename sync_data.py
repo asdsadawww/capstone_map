@@ -230,3 +230,6 @@ def fetch_api_items(source: dict):
 
         if page * num_of_rows >= total_count:
             break
+
+if __name__ == "__main__":
+    sync_to_tidb()
