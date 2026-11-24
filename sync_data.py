@@ -186,10 +186,10 @@ def fetch_api_items(source: dict):
             items = data.get("body") or []
         else:
             response = data.get("response", {})
-            header = response.get("header", {})
+            header = response.get("header") or data
             result_code = str(header.get("resultCode", ""))
             if result_code != "00":
-                print(f"[{category}] API 응답 오류 ({result_code}): {header.get('resultMsg')}")
+                print(f"[{category}] API 응답 오류 ({result_code}): {header.get('resultMsg') or data}")
                 break
             body = response.get("body", {})
             total_count = int(body.get("totalCount", 0))
