@@ -32,8 +32,8 @@ API_SOURCES = [
         "platform": "data_go_kr_v2",
         "service_key": PUBLIC_DATA_KEY,
         "url": "https://apis.data.go.kr/1741000/public_restroom_info_v2/info_v2",
-        "name_keys": ["toiletNm", "화장실명", "PBCTLT_PLC_NM", "FCLTY_NM", "REARE_NM", "RESTROOM_NM", "NM"],
-        "addr_keys": ["rdnmadr", "lnmadr", "소재지도로명주소", "소재지지번주소", "LCTN_ROAD_NM_ADDR", "LCTN_LOTNO_ADDR", "RONA_DADDR", "DADDR", "ADRES"],
+        "name_keys": ["RSTRM_NM", "toiletNm", "화장실명", "PBCTLT_PLC_NM", "FCLTY_NM", "NM"],
+        "addr_keys": ["LCTN_ROAD_NM_ADDR", "LCTN_LOTNO_ADDR", "rdnmadr", "lnmadr", "소재지도로명주소", "소재지지번주소"],
         "lat_keys": ["latitude", "WGS84위도", "위도", "WGS84_LA", "LAT", "LA"],
         "lng_keys": ["longitude", "WGS84경도", "경도", "WGS84_LO", "LOT", "LO", "LNG"],
     },
@@ -42,8 +42,8 @@ API_SOURCES = [
         "platform": "data_go_kr",
         "service_key": PUBLIC_DATA_KEY,
         "url": "https://api.data.go.kr/openapi/tn_pubr_public_drowsy_shelter_api",
-        "name_keys": ["shltrNm", "drowsyShelterNm", "restAreaNm", "졸음쉼터명", "FCLTY_NM", "REARE_NM", "NM"],
-        "addr_keys": ["rdnmadr", "lnmadr", "소재지도로명주소", "소재지지번주소", "RONA_DADDR", "DADDR", "ADRES"],
+        "name_keys": ["shltrNm", "drowsyShelterNm", "restAreaNm", "졸음쉼터명", "FCLTY_NM", "NM"],
+        "addr_keys": ["rdnmadr", "lnmadr", "소재지도로명주소", "소재지지번주소", "LCTN_ROAD_NM_ADDR", "LCTN_LOTNO_ADDR"],
         "lat_keys": ["latitude", "WGS84위도", "위도", "LAT", "LA"],
         "lng_keys": ["longitude", "WGS84경도", "경도", "LOT", "LO", "LNG"],
     },
@@ -89,6 +89,20 @@ def pick_value(row: dict, keys: list) -> str:
         if val is not None and str(val).strip() != "":
             return str(val).strip()
     return ""
+
+
+def pick_all_values(row: dict, keys: list) -> list:
+    lower_map = {str(k).lower(): v for k, v in row.items()}
+    vals = []
+    for k in keys:
+        val = row.get(k)
+        if val is None:
+            val = lower_map.get(k.lower())
+        if val is not None and str(val).strip() != "":
+            s = str(val).strip()
+            if s not in vals:
+                vals.append(s)
+    return vals
 
 
 def parse_xml_response(xml_text: str):
@@ -145,7 +159,7 @@ def geocode_address(address: str, fallback_name: str = ""):
     return None, None
 
 
-def fetch_api_items(source: dict):
+def fetch_api_items(source: dict, existing_keys: set):
     category = source["category"]
     raw_key = source.get("service_key", "")
     if not raw_key:
@@ -160,7 +174,7 @@ def fetch_api_items(source: dict):
     num_of_rows = 500 if is_safetydata else 1000
     max_retries = 6 if is_safetydata else 3
     geocode_used = 0
-    max_geocode_per_source = 300
+    max_geocode_per_source = 10000
 
     session = requests.Session()
     session.headers.update({"User-Agent": "Mozilla/5.0 (compatible; CapstoneMapBot/1.0)"})
@@ -262,7 +276,12 @@ def fetch_api_items(source: dict):
             if not name:
                 continue
 
-            addr = pick_value(row, source["addr_keys"])
+            addr_candidates = pick_all_values(row, source["addr_keys"])
+            addr = addr_candidates[0] if addr_candidates else ""
+
+            if (category, name, addr) in existing_keys:
+                continue
+
             lat_str = pick_value(row, source["lat_keys"])
             lng_str = pick_value(row, source["lng_keys"])
 
@@ -276,16 +295,20 @@ def fetch_api_items(source: dict):
                 lat, lng = lng, lat
 
             if not (33.0 <= lat <= 39.0 and 124.0 <= lng <= 132.0):
-                if geocode_used < max_geocode_per_source and addr:
-                    lat, lng = geocode_address(addr, name)
-                    geocode_used += 1
-                    time.sleep(0.05)
+                if geocode_used < max_geocode_per_source and addr_candidates:
+                    for cand_addr in addr_candidates:
+                        lat, lng = geocode_address(cand_addr, name)
+                        geocode_used += 1
+                        time.sleep(0.03)
+                        if lat and lng:
+                            break
                 if not lat or not lng:
                     continue
 
+            existing_keys.add((category, name, addr))
             collected.append((category, name, lat, lng, addr, "PENDING", ""))
 
-        print(f"  - {page}페이지 완료 (누적 {len(collected)} / 전체 {total_count}건)")
+        print(f"  - {page}페이지 완료 (신규 누적 {len(collected)} / 전체 {total_count}건)")
 
         if total_count > 0 and page * num_of_rows >= total_count:
             break
@@ -297,44 +320,40 @@ def fetch_api_items(source: dict):
 
 
 def sync_to_tidb():
+    existing_keys = set()
+    conn = pymysql.connect(**DB_CONFIG)
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute(f"SELECT category, name, address FROM {TABLE_NAME}")
+            for r in cursor.fetchall():
+                existing_keys.add((r["category"], r["name"], r["address"] or ""))
+    finally:
+        conn.close()
+
     all_items = []
     for source in API_SOURCES:
         print(f"▶ [{source['category']}] 공공데이터 수집 시작...")
-        items = fetch_api_items(source)
-        print(f"  수집 완료: {len(items)}건")
+        items = fetch_api_items(source, existing_keys)
+        print(f"  신규 수집 완료: {len(items)}건")
         all_items.extend(items)
 
     if not all_items:
-        print("동기화할 데이터가 없습니다.")
+        print("동기화할 신규 데이터가 없습니다.")
         return
 
     conn = pymysql.connect(**DB_CONFIG)
     try:
         with conn.cursor() as cursor:
-            cursor.execute(f"SELECT id, category, name, address, lat, lng FROM {TABLE_NAME}")
-            existing_rows = cursor.fetchall()
-
-            existing_keys = set()
-            for r in existing_rows:
-                existing_keys.add((r["category"], r["name"], r["address"] or ""))
-
-            to_insert = []
-            for item in all_items:
-                key = (item[0], item[1], item[4])
-                if key not in existing_keys:
-                    to_insert.append(item)
-                    existing_keys.add(key)
-
             insert_sql = (
                 f"INSERT INTO {TABLE_NAME} (category, name, lat, lng, address, status, note) "
                 "VALUES (%s, %s, %s, %s, %s, %s, %s)"
             )
-            for i in range(0, len(to_insert), 500):
+            for i in range(0, len(to_insert := all_items), 500):
                 conn.ping(reconnect=True)
                 cursor.executemany(insert_sql, to_insert[i : i + 500])
                 conn.commit()
 
-        print(f"✅ 동기화 완료! 신규 추가: {len(to_insert)}건")
+        print(f"✅ 동기화 완료! 신규 추가: {len(all_items)}건")
     finally:
         conn.close()
 
