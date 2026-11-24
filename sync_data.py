@@ -32,17 +32,17 @@ API_SOURCES = [
         "platform": "data_go_kr_v2",
         "service_key": PUBLIC_DATA_KEY,
         "url": "https://apis.data.go.kr/1741000/public_restroom_info_v2/info_v2",
-        "name_keys": ["toiletNm", "화장실명", "FCLTY_NM", "REARE_NM", "RESTROOM_NM", "NM"],
-        "addr_keys": ["rdnmadr", "lnmadr", "소재지도로명주소", "소재지지번주소", "RONA_DADDR", "DADDR", "ADRES"],
-        "lat_keys": ["latitude", "WGS84위도", "위도", "LAT", "LA"],
-        "lng_keys": ["longitude", "WGS84경도", "경도", "LOT", "LO", "LNG"],
+        "name_keys": ["toiletNm", "화장실명", "PBCTLT_PLC_NM", "FCLTY_NM", "REARE_NM", "RESTROOM_NM", "NM"],
+        "addr_keys": ["rdnmadr", "lnmadr", "소재지도로명주소", "소재지지번주소", "LCTN_ROAD_NM_ADDR", "LCTN_LOTNO_ADDR", "RONA_DADDR", "DADDR", "ADRES"],
+        "lat_keys": ["latitude", "WGS84위도", "위도", "WGS84_LA", "LAT", "LA"],
+        "lng_keys": ["longitude", "WGS84경도", "경도", "WGS84_LO", "LOT", "LO", "LNG"],
     },
     {
         "category": "졸음쉼터",
         "platform": "data_go_kr",
         "service_key": PUBLIC_DATA_KEY,
         "url": "https://api.data.go.kr/openapi/tn_pubr_public_drowsy_shelter_api",
-        "name_keys": ["drowsyShelterNm", "restAreaNm", "졸음쉼터명", "FCLTY_NM", "REARE_NM", "NM"],
+        "name_keys": ["shltrNm", "drowsyShelterNm", "restAreaNm", "졸음쉼터명", "FCLTY_NM", "REARE_NM", "NM"],
         "addr_keys": ["rdnmadr", "lnmadr", "소재지도로명주소", "소재지지번주소", "RONA_DADDR", "DADDR", "ADRES"],
         "lat_keys": ["latitude", "WGS84위도", "위도", "LAT", "LA"],
         "lng_keys": ["longitude", "WGS84경도", "경도", "LOT", "LO", "LNG"],
@@ -99,7 +99,7 @@ def parse_xml_response(xml_text: str):
         return {"error": f"({reason}) {err_msg}"}
 
     result_code = (root.findtext(".//header/resultCode") or "").strip()
-    if result_code and result_code != "00":
+    if result_code and result_code not in ("0", "00"):
         result_msg = root.findtext(".//header/resultMsg") or ""
         return {"error": f"({result_code}) {result_msg}"}
 
@@ -212,33 +212,36 @@ def fetch_api_items(source: dict):
                 break
             total_count = xml_parsed["totalCount"]
             items = xml_parsed["items"]
-        elif "response" in data and isinstance(data["response"], dict):
-            response = data["response"]
-            header = response.get("header") or data
-            result_code = str(header.get("resultCode", ""))
-            if result_code != "00":
-                print(f"[{category}] API 응답 오류 ({result_code}): {header.get('resultMsg') or data}")
-                break
-            body = response.get("body", {})
-            total_count = int(body.get("totalCount", 0))
-            raw_items = body.get("items", [])
-            if isinstance(raw_items, dict):
-                items = raw_items.get("item", [])
+        elif isinstance(data, dict):
+            root_obj = data["response"] if isinstance(data.get("response"), dict) else data
+            header = root_obj.get("header")
+            if isinstance(header, dict):
+                result_code = str(header.get("resultCode", "")).strip()
+                if result_code and result_code not in ("0", "00"):
+                    print(f"[{category}] API 응답 오류 ({result_code}): {header.get('resultMsg') or header}")
+                    break
+
+            body = root_obj.get("body")
+            if isinstance(body, list):
+                total_count = int(root_obj.get("totalCount") or data.get("totalCount") or 0)
+                items = body
+            elif isinstance(body, dict):
+                total_count = int(body.get("totalCount") or root_obj.get("totalCount") or 0)
+                raw_items = body.get("items")
+                if isinstance(raw_items, dict):
+                    items = raw_items.get("item") or []
+                elif isinstance(raw_items, list):
+                    items = raw_items
+                else:
+                    items = body.get("item") or body.get("data") or []
+                if isinstance(items, dict):
+                    items = [items]
+            elif isinstance(root_obj.get("data"), list):
+                total_count = int(root_obj.get("matchCount") or root_obj.get("totalCount") or 0)
+                items = root_obj["data"]
             else:
-                items = raw_items or []
-            if isinstance(items, dict):
-                items = [items]
-        elif "body" in data and isinstance(data["body"], list):
-            header = data.get("header", {})
-            result_code = str(header.get("resultCode", ""))
-            if result_code and result_code != "00":
-                print(f"[{category}] API 응답 오류 ({result_code}): {header.get('resultMsg')}")
+                print(f"[{category}] 알 수 없는 응답 형식: {str(data)[:250]}")
                 break
-            total_count = int(data.get("totalCount", 0))
-            items = data.get("body") or []
-        elif "data" in data and isinstance(data["data"], list):
-            total_count = int(data.get("matchCount") or data.get("totalCount") or 0)
-            items = data.get("data") or []
         else:
             print(f"[{category}] 알 수 없는 응답 형식: {str(data)[:250]}")
             break
