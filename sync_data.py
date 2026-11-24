@@ -19,12 +19,12 @@ DB_CONFIG = {
 TABLE_NAME = "location_items"
 PUBLIC_DATA_KEY = os.getenv("PUBLIC_DATA_KEY", "")      # 공공데이터포털 인증키
 KAKAO_REST_KEY = os.getenv("KAKAO_REST_KEY", "")        # 카카오 디벨로퍼스 REST API 키
-COLD_SHELTER_KEY = os.getenv("COLD_SHELTER_KEY", "")    # 한파쉼터 서비스키
-HEAT_SHELTER_KEY = os.getenv("HEAT_SHELTER_KEY", "")    # 무더위쉼터 서비스키
+COLD_SHELTER_KEY = os.getenv("HEAT_SHELTER_KEY", "")    # 한파쉼터 서비스키
+HEAT_SHELTER_KEY = os.getenv("COLD_SHELTER_KEY", "")    # 무더위쉼터 서비스키
 
 # ※ safetydata.go.kr 마이페이지 -> 오픈API 신청현황의 요청주소(DSSP-IF-번호)와 일치해야 합니다.
-COLD_SHELTER_URL = "https://www.safetydata.go.kr/V2/api/DSSP-IF-10804"
-HEAT_SHELTER_URL = "https://www.safetydata.go.kr/V2/api/DSSP-IF-10942"
+HEAT_SHELTER_URL = "https://www.safetydata.go.kr/V2/api/DSSP-IF-10804"
+COLD_SHELTER_URL = "https://www.safetydata.go.kr/V2/api/DSSP-IF-10942"
 
 API_SOURCES = [
     {
@@ -63,8 +63,8 @@ API_SOURCES = [
     {
         "category": "한파쉼터",
         "platform": "safetydata",
-        "service_key": COLD_SHELTER_KEY,
-        "url": COLD_SHELTER_URL,
+        "service_key": HEAT_SHELTER_KEY,
+        "url": HEAT_SHELTER_URL,
         "name_key": "RSTR_NM",
         "addr_key": "RN_DTL_ADRES",
         "fallback_addr_key": "DTL_ADRES",
@@ -74,8 +74,8 @@ API_SOURCES = [
     {
         "category": "무더위쉼터",
         "platform": "safetydata",
-        "service_key": HEAT_SHELTER_KEY,
-        "url": HEAT_SHELTER_URL,
+        "service_key": COLD_SHELTER_KEY,
+        "url": COLD_SHELTER_URL,
         "name_key": "RSTR_NM",
         "addr_key": "RN_DTL_ADRES",
         "fallback_addr_key": "DTL_ADRES",
