@@ -19,8 +19,8 @@ DB_CONFIG = {
 TABLE_NAME = "location_items"
 PUBLIC_DATA_KEY = os.getenv("PUBLIC_DATA_KEY", "")      # 공공데이터포털 인증키
 KAKAO_REST_KEY = os.getenv("KAKAO_REST_KEY", "")        # 카카오 디벨로퍼스 REST API 키
-COLD_SHELTER_KEY = os.getenv("HEAT_SHELTER_KEY", "")    # 한파쉼터 서비스키
-HEAT_SHELTER_KEY = os.getenv("COLD_SHELTER_KEY", "")    # 무더위쉼터 서비스키
+HEAT_SHELTER_KEY = os.getenv("HEAT_SHELTER_KEY", "")    # 한파쉼터 서비스키
+COLD_SHELTER_KEY = os.getenv("COLD_SHELTER_KEY", "")    # 무더위쉼터 서비스키
 
 # ※ safetydata.go.kr 마이페이지 -> 오픈API 신청현황의 요청주소(DSSP-IF-번호)와 일치해야 합니다.
 HEAT_SHELTER_URL = "https://www.safetydata.go.kr/V2/api/DSSP-IF-10804"
