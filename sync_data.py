@@ -1,8 +1,11 @@
 import os
+import sys
 import time
 import urllib.parse
 import requests
 import pymysql
+
+sys.stdout.reconfigure(line_buffering=True)
 
 DB_CONFIG = {
     "host": "gateway01.ap-northeast-1.prod.aws.tidbcloud.com",
@@ -230,6 +233,55 @@ def fetch_api_items(source: dict):
 
         if page * num_of_rows >= total_count:
             break
+
+        page += 1
+        time.sleep(0.5 if source["platform"] == "safetydata" else 0.2)
+
+    return collected
+
+
+def sync_to_tidb():
+    all_items = []
+    for source in API_SOURCES:
+        print(f"▶ [{source['category']}] 공공데이터 수집 시작...")
+        items = fetch_api_items(source)
+        print(f"  수집 완료: {len(items)}건")
+        all_items.extend(items)
+
+    if not all_items:
+        print("동기화할 데이터가 없습니다.")
+        return
+
+    conn = pymysql.connect(**DB_CONFIG)
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute(f"SELECT id, category, name, address, lat, lng FROM {TABLE_NAME}")
+            existing_rows = cursor.fetchall()
+
+            existing_keys = set()
+            for r in existing_rows:
+                existing_keys.add((r["category"], r["name"], r["address"] or ""))
+
+            to_insert = []
+            for item in all_items:
+                key = (item[0], item[1], item[4])
+                if key not in existing_keys:
+                    to_insert.append(item)
+                    existing_keys.add(key)
+
+            insert_sql = (
+                f"INSERT INTO {TABLE_NAME} (category, name, lat, lng, address, status, note) "
+                "VALUES (%s, %s, %s, %s, %s, %s, %s)"
+            )
+            for i in range(0, len(to_insert), 500):
+                conn.ping(reconnect=True)
+                cursor.executemany(insert_sql, to_insert[i : i + 500])
+                conn.commit()
+
+        print(f"✅ 동기화 완료! 신규 추가: {len(to_insert)}건")
+    finally:
+        conn.close()
+
 
 if __name__ == "__main__":
     sync_to_tidb()
