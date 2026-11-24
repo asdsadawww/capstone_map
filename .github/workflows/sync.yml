@@ -27,4 +27,6 @@ jobs:
           DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
           PUBLIC_DATA_KEY: ${{ secrets.PUBLIC_DATA_KEY }}
           KAKAO_REST_KEY: ${{ secrets.KAKAO_REST_KEY }}
+          COLD_SHELTER_KEY: ${{ secrets.COLD_SHELTER_KEY }}
+          HEAT_SHELTER_KEY: ${{ secrets.HEAT_SHELTER_KEY }}
         run: python sync_data.py
