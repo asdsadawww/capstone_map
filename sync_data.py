@@ -160,6 +160,12 @@ def fetch_api_items(source: dict):
                         "type": "json",
                     }
                     res = session.get(source["url"], params=params, timeout=60)
+                    if "SERVICE_KEY_IS_NOT_REGISTERED_ERROR" in res.text:
+                        raw_url = (
+                            f"{source['url']}?serviceKey={raw_key}"
+                            f"&pageNo={page}&numOfRows={num_of_rows}&type=json"
+                        )
+                        res = session.get(raw_url, timeout=60)
 
                 text = res.text.strip()
                 if text.startswith("<"):
