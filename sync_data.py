@@ -2,6 +2,7 @@ import os
 import sys
 import time
 import urllib.parse
+import xml.etree.ElementTree as ET
 import requests
 import pymysql
 
@@ -28,30 +29,30 @@ KAKAO_REST_KEY = os.getenv("KAKAO_REST_KEY", "").strip()
 API_SOURCES = [
     {
         "category": "공중화장실",
-        "platform": "data_go_kr",
+        "platform": "data_go_kr_v2",
         "service_key": PUBLIC_DATA_KEY,
-        "url": "http://api.data.go.kr/openapi/tn_pubr_public_toilet_api",
-        "name_keys": ["toiletNm"],
-        "addr_keys": ["rdnmadr", "lnmadr"],
-        "lat_keys": ["latitude"],
-        "lng_keys": ["longitude"],
+        "url": "https://apis.data.go.kr/1741000/public_restroom_info_v2/info_v2",
+        "name_keys": ["toiletNm", "화장실명", "FCLTY_NM", "REARE_NM", "RESTROOM_NM", "NM"],
+        "addr_keys": ["rdnmadr", "lnmadr", "소재지도로명주소", "소재지지번주소", "RONA_DADDR", "DADDR", "ADRES"],
+        "lat_keys": ["latitude", "WGS84위도", "위도", "LAT", "LA"],
+        "lng_keys": ["longitude", "WGS84경도", "경도", "LOT", "LO", "LNG"],
     },
     {
         "category": "졸음쉼터",
         "platform": "data_go_kr",
         "service_key": PUBLIC_DATA_KEY,
-        "url": "http://api.data.go.kr/openapi/tn_pubr_public_rest_area_api",
-        "name_keys": ["restAreaNm"],
-        "addr_keys": ["rdnmadr", "lnmadr"],
-        "lat_keys": ["latitude"],
-        "lng_keys": ["longitude"],
+        "url": "https://api.data.go.kr/openapi/tn_pubr_public_drowsy_shelter_api",
+        "name_keys": ["drowsyShelterNm", "restAreaNm", "졸음쉼터명", "FCLTY_NM", "REARE_NM", "NM"],
+        "addr_keys": ["rdnmadr", "lnmadr", "소재지도로명주소", "소재지지번주소", "RONA_DADDR", "DADDR", "ADRES"],
+        "lat_keys": ["latitude", "WGS84위도", "위도", "LAT", "LA"],
+        "lng_keys": ["longitude", "WGS84경도", "경도", "LOT", "LO", "LNG"],
     },
     {
         "category": "AED",
         "platform": "data_go_kr",
         "service_key": PUBLIC_DATA_KEY,
-        "url": "http://apis.data.go.kr/B552657/AEDInfoInqireService/getAedFullDown",
-        "name_keys": ["buildPlace"],
+        "url": "https://apis.data.go.kr/B552657/AEDInfoInqireService/getAedFullDown",
+        "name_keys": ["buildPlace", "org"],
         "addr_keys": ["buildAddress"],
         "lat_keys": ["wgs84Lat"],
         "lng_keys": ["wgs84Lon"],
@@ -88,6 +89,27 @@ def pick_value(row: dict, keys: list) -> str:
         if val is not None and str(val).strip() != "":
             return str(val).strip()
     return ""
+
+
+def parse_xml_response(xml_text: str):
+    root = ET.fromstring(xml_text)
+    err_msg = root.findtext(".//errMsg")
+    if err_msg:
+        reason = root.findtext(".//returnReasonCode") or ""
+        return {"error": f"({reason}) {err_msg}"}
+
+    result_code = (root.findtext(".//header/resultCode") or "").strip()
+    if result_code and result_code != "00":
+        result_msg = root.findtext(".//header/resultMsg") or ""
+        return {"error": f"({result_code}) {result_msg}"}
+
+    total_str = (root.findtext(".//body/totalCount") or "0").strip()
+    total_count = int(total_str) if total_str.isdigit() else 0
+    items = []
+    for item_el in root.findall(".//body/items/item"):
+        row = {child.tag: (child.text or "").strip() for child in item_el}
+        items.append(row)
+    return {"totalCount": total_count, "items": items}
 
 
 def geocode_address(address: str, fallback_name: str = ""):
@@ -133,7 +155,8 @@ def fetch_api_items(source: dict):
     clean_key = urllib.parse.unquote(raw_key)
     collected = []
     page = 1
-    is_safetydata = source["platform"] == "safetydata"
+    platform = source["platform"]
+    is_safetydata = platform == "safetydata"
     num_of_rows = 500 if is_safetydata else 1000
     max_retries = 6 if is_safetydata else 3
     geocode_used = 0
@@ -144,9 +167,10 @@ def fetch_api_items(source: dict):
 
     while True:
         data = None
+        xml_parsed = None
         for attempt in range(1, max_retries + 1):
             try:
-                if is_safetydata:
+                if is_safetydata or platform == "data_go_kr_v2":
                     req_url = (
                         f"{source['url']}?serviceKey={raw_key}"
                         f"&returnType=json&pageNo={page}&numOfRows={num_of_rows}"
@@ -169,8 +193,8 @@ def fetch_api_items(source: dict):
 
                 text = res.text.strip()
                 if text.startswith("<"):
-                    print(f"[{category}] 일일 호출 한도 초과 또는 XML 오류 응답으로 건너뜁니다.")
-                    return collected
+                    xml_parsed = parse_xml_response(text)
+                    break
 
                 data = res.json()
                 break
@@ -178,122 +202,18 @@ def fetch_api_items(source: dict):
                 print(f"[{category}] {page}페이지 요청 지연 (시도 {attempt}/{max_retries}): {e}")
                 time.sleep(min(2 * attempt, 10))
 
-        if data is None:
+        if data is None and xml_parsed is None:
             print(f"[{category}] {page}페이지 재시도 실패로 현재까지 수집된 {len(collected)}건만 저장합니다.")
             break
 
-        if is_safetydata:
-            header = data.get("header", {})
-            result_code = str(header.get("resultCode", ""))
-            if result_code != "00":
-                print(f"[{category}] API 응답 오류 ({result_code}): {header.get('resultMsg')}")
+        if xml_parsed is not None:
+            if "error" in xml_parsed:
+                print(f"[{category}] API 응답 오류: {xml_parsed['error']}")
                 break
-            total_count = int(data.get("totalCount", 0))
-            items = data.get("body") or []
-        else:
-            response = data.get("response", {})
+            total_count = xml_parsed["totalCount"]
+            items = xml_parsed["items"]
+        elif "response" in data and isinstance(data["response"], dict):
+            response = data["response"]
             header = response.get("header") or data
             result_code = str(header.get("resultCode", ""))
-            if result_code != "00":
-                print(f"[{category}] API 응답 오류 ({result_code}): {header.get('resultMsg') or data}")
-                break
-            body = response.get("body", {})
-            total_count = int(body.get("totalCount", 0))
-            raw_items = body.get("items", [])
-            if isinstance(raw_items, dict):
-                items = raw_items.get("item", [])
-            else:
-                items = raw_items or []
-            if isinstance(items, dict):
-                items = [items]
-
-        if not items:
-            break
-
-        for row in items:
-            if not isinstance(row, dict):
-                continue
-
-            name = pick_value(row, source["name_keys"])
-            if not name:
-                continue
-
-            addr = pick_value(row, source["addr_keys"])
-            lat_str = pick_value(row, source["lat_keys"])
-            lng_str = pick_value(row, source["lng_keys"])
-
-            try:
-                lat = float(lat_str) if lat_str else 0.0
-                lng = float(lng_str) if lng_str else 0.0
-            except ValueError:
-                lat, lng = 0.0, 0.0
-
-            if 124.0 <= lat <= 132.0 and 33.0 <= lng <= 39.0:
-                lat, lng = lng, lat
-
-            if not (33.0 <= lat <= 39.0 and 124.0 <= lng <= 132.0):
-                if geocode_used < max_geocode_per_source and addr:
-                    lat, lng = geocode_address(addr, name)
-                    geocode_used += 1
-                    time.sleep(0.05)
-                if not lat or not lng:
-                    continue
-
-            collected.append((category, name, lat, lng, addr, "PENDING", ""))
-
-        print(f"  - {page}페이지 완료 (누적 {len(collected)} / 전체 {total_count}건)")
-
-        if page * num_of_rows >= total_count:
-            break
-
-        page += 1
-        time.sleep(0.4 if is_safetydata else 0.2)
-
-    return collected
-
-
-def sync_to_tidb():
-    all_items = []
-    for source in API_SOURCES:
-        print(f"▶ [{source['category']}] 공공데이터 수집 시작...")
-        items = fetch_api_items(source)
-        print(f"  수집 완료: {len(items)}건")
-        all_items.extend(items)
-
-    if not all_items:
-        print("동기화할 데이터가 없습니다.")
-        return
-
-    conn = pymysql.connect(**DB_CONFIG)
-    try:
-        with conn.cursor() as cursor:
-            cursor.execute(f"SELECT id, category, name, address, lat, lng FROM {TABLE_NAME}")
-            existing_rows = cursor.fetchall()
-
-            existing_keys = set()
-            for r in existing_rows:
-                existing_keys.add((r["category"], r["name"], r["address"] or ""))
-
-            to_insert = []
-            for item in all_items:
-                key = (item[0], item[1], item[4])
-                if key not in existing_keys:
-                    to_insert.append(item)
-                    existing_keys.add(key)
-
-            insert_sql = (
-                f"INSERT INTO {TABLE_NAME} (category, name, lat, lng, address, status, note) "
-                "VALUES (%s, %s, %s, %s, %s, %s, %s)"
-            )
-            for i in range(0, len(to_insert), 500):
-                conn.ping(reconnect=True)
-                cursor.executemany(insert_sql, to_insert[i : i + 500])
-                conn.commit()
-
-        print(f"✅ 동기화 완료! 신규 추가: {len(to_insert)}건")
-    finally:
-        conn.close()
-
-
-if __name__ == "__main__":
-    sync_to_tidb()
+            if result_code !=
