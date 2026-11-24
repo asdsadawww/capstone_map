@@ -60,7 +60,7 @@ API_SOURCES = [
     {
         "category": "한파쉼터",
         "platform": "safetydata",
-        "service_key": HEAT_SHELTER_KEY,
+        "service_key": COLD_SHELTER_KEY,
         "url": "https://www.safetydata.go.kr/V2/api/DSSP-IF-10804",
         "name_keys": ["REARE_NM", "RSTR_NM", "FCLTY_NM", "SHLT_NM", "NM"],
         "addr_keys": ["RONA_DADDR", "DADDR", "RN_DTL_ADRES", "RDNMADR", "LNMADR", "ADRES"],
@@ -70,7 +70,7 @@ API_SOURCES = [
     {
         "category": "무더위쉼터",
         "platform": "safetydata",
-        "service_key": COLD_SHELTER_KEY,
+        "service_key": HEAT_SHELTER_KEY,
         "url": "https://www.safetydata.go.kr/V2/api/DSSP-IF-10942",
         "name_keys": ["REARE_NM", "RSTR_NM", "FCLTY_NM", "SHLT_NM", "NM"],
         "addr_keys": ["RONA_DADDR", "DADDR", "RN_DTL_ADRES", "RDNMADR", "LNMADR", "ADRES"],
@@ -216,4 +216,125 @@ def fetch_api_items(source: dict):
             response = data["response"]
             header = response.get("header") or data
             result_code = str(header.get("resultCode", ""))
-            if result_code !=
+            if result_code != "00":
+                print(f"[{category}] API 응답 오류 ({result_code}): {header.get('resultMsg') or data}")
+                break
+            body = response.get("body", {})
+            total_count = int(body.get("totalCount", 0))
+            raw_items = body.get("items", [])
+            if isinstance(raw_items, dict):
+                items = raw_items.get("item", [])
+            else:
+                items = raw_items or []
+            if isinstance(items, dict):
+                items = [items]
+        elif "body" in data and isinstance(data["body"], list):
+            header = data.get("header", {})
+            result_code = str(header.get("resultCode", ""))
+            if result_code and result_code != "00":
+                print(f"[{category}] API 응답 오류 ({result_code}): {header.get('resultMsg')}")
+                break
+            total_count = int(data.get("totalCount", 0))
+            items = data.get("body") or []
+        elif "data" in data and isinstance(data["data"], list):
+            total_count = int(data.get("matchCount") or data.get("totalCount") or 0)
+            items = data.get("data") or []
+        else:
+            print(f"[{category}] 알 수 없는 응답 형식: {str(data)[:250]}")
+            break
+
+        if not items:
+            break
+
+        if page == 1 and isinstance(items[0], dict):
+            test_name = pick_value(items[0], source["name_keys"])
+            if not test_name:
+                print(f"[{category}] 경고: 이름 키 매칭 실패! 실제 응답 키 목록: {list(items[0].keys())}")
+
+        for row in items:
+            if not isinstance(row, dict):
+                continue
+
+            name = pick_value(row, source["name_keys"])
+            if not name:
+                continue
+
+            addr = pick_value(row, source["addr_keys"])
+            lat_str = pick_value(row, source["lat_keys"])
+            lng_str = pick_value(row, source["lng_keys"])
+
+            try:
+                lat = float(lat_str) if lat_str else 0.0
+                lng = float(lng_str) if lng_str else 0.0
+            except ValueError:
+                lat, lng = 0.0, 0.0
+
+            if 124.0 <= lat <= 132.0 and 33.0 <= lng <= 39.0:
+                lat, lng = lng, lat
+
+            if not (33.0 <= lat <= 39.0 and 124.0 <= lng <= 132.0):
+                if geocode_used < max_geocode_per_source and addr:
+                    lat, lng = geocode_address(addr, name)
+                    geocode_used += 1
+                    time.sleep(0.05)
+                if not lat or not lng:
+                    continue
+
+            collected.append((category, name, lat, lng, addr, "PENDING", ""))
+
+        print(f"  - {page}페이지 완료 (누적 {len(collected)} / 전체 {total_count}건)")
+
+        if total_count > 0 and page * num_of_rows >= total_count:
+            break
+
+        page += 1
+        time.sleep(0.4 if is_safetydata else 0.2)
+
+    return collected
+
+
+def sync_to_tidb():
+    all_items = []
+    for source in API_SOURCES:
+        print(f"▶ [{source['category']}] 공공데이터 수집 시작...")
+        items = fetch_api_items(source)
+        print(f"  수집 완료: {len(items)}건")
+        all_items.extend(items)
+
+    if not all_items:
+        print("동기화할 데이터가 없습니다.")
+        return
+
+    conn = pymysql.connect(**DB_CONFIG)
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute(f"SELECT id, category, name, address, lat, lng FROM {TABLE_NAME}")
+            existing_rows = cursor.fetchall()
+
+            existing_keys = set()
+            for r in existing_rows:
+                existing_keys.add((r["category"], r["name"], r["address"] or ""))
+
+            to_insert = []
+            for item in all_items:
+                key = (item[0], item[1], item[4])
+                if key not in existing_keys:
+                    to_insert.append(item)
+                    existing_keys.add(key)
+
+            insert_sql = (
+                f"INSERT INTO {TABLE_NAME} (category, name, lat, lng, address, status, note) "
+                "VALUES (%s, %s, %s, %s, %s, %s, %s)"
+            )
+            for i in range(0, len(to_insert), 500):
+                conn.ping(reconnect=True)
+                cursor.executemany(insert_sql, to_insert[i : i + 500])
+                conn.commit()
+
+        print(f"✅ 동기화 완료! 신규 추가: {len(to_insert)}건")
+    finally:
+        conn.close()
+
+
+if __name__ == "__main__":
+    sync_to_tidb()
