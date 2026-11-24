@@ -171,8 +171,9 @@ def fetch_api_items(source: dict, existing_keys: set):
     page = 1
     platform = source["platform"]
     is_safetydata = platform == "safetydata"
-    num_of_rows = 500 if is_safetydata else 1000
-    max_retries = 6 if is_safetydata else 3
+    is_v2 = platform == "data_go_kr_v2"
+    num_of_rows = 300 if is_v2 else (500 if is_safetydata else 1000)
+    max_retries = 6 if (is_safetydata or is_v2) else 3
     geocode_used = 0
     max_geocode_per_source = 10000
 
@@ -184,7 +185,7 @@ def fetch_api_items(source: dict, existing_keys: set):
         xml_parsed = None
         for attempt in range(1, max_retries + 1):
             try:
-                if is_safetydata or platform == "data_go_kr_v2":
+                if is_safetydata or is_v2:
                     req_url = (
                         f"{source['url']}?serviceKey={raw_key}"
                         f"&returnType=json&pageNo={page}&numOfRows={num_of_rows}"
@@ -210,11 +211,20 @@ def fetch_api_items(source: dict, existing_keys: set):
                     xml_parsed = parse_xml_response(text)
                     break
 
-                data = res.json()
+                parsed = res.json()
+                if isinstance(parsed, dict) and "OpenAPI_ServiceResponse" in parsed:
+                    cmm = parsed["OpenAPI_ServiceResponse"].get("cmmMsgHeader", {})
+                    err_code = str(cmm.get("returnReasonCode", ""))
+                    err_msg = cmm.get("errMsg") or cmm.get("returnAuthMsg") or ""
+                    print(f"[{category}] {page}페이지 서버 지연 ({err_code}: {err_msg}) - 재시도 ({attempt}/{max_retries})")
+                    time.sleep(min(3 * attempt, 15))
+                    continue
+
+                data = parsed
                 break
             except Exception as e:
                 print(f"[{category}] {page}페이지 요청 지연 (시도 {attempt}/{max_retries}): {e}")
-                time.sleep(min(2 * attempt, 10))
+                time.sleep(min(3 * attempt, 15))
 
         if data is None and xml_parsed is None:
             print(f"[{category}] {page}페이지 재시도 실패로 현재까지 수집된 {len(collected)}건만 저장합니다.")
@@ -314,7 +324,7 @@ def fetch_api_items(source: dict, existing_keys: set):
             break
 
         page += 1
-        time.sleep(0.4 if is_safetydata else 0.2)
+        time.sleep(0.4 if (is_safetydata or is_v2) else 0.2)
 
     return collected
 
@@ -348,9 +358,9 @@ def sync_to_tidb():
                 f"INSERT INTO {TABLE_NAME} (category, name, lat, lng, address, status, note) "
                 "VALUES (%s, %s, %s, %s, %s, %s, %s)"
             )
-            for i in range(0, len(to_insert := all_items), 500):
+            for i in range(0, len(all_items), 500):
                 conn.ping(reconnect=True)
-                cursor.executemany(insert_sql, to_insert[i : i + 500])
+                cursor.executemany(insert_sql, all_items[i : i + 500])
                 conn.commit()
 
         print(f"✅ 동기화 완료! 신규 추가: {len(all_items)}건")
