@@ -124,7 +124,7 @@ def geocode_address(address: str, fallback_name: str = ""):
 
 
 def fetch_api_items(source):
-    """data.go.kr 및 safetydata.go.kr 응답을 자동 판별하여 수집 (타임아웃 60초 + 3회 재시도)"""
+    """data.go.kr 및 safetydata.go.kr 응답을 자동 판별하여 수집"""
     raw_key = source.get("service_key", "").strip()
     if not raw_key:
         print(f"  [{source['category']}] 서비스키가 비어 있어 건너뜁니다.")
@@ -169,7 +169,7 @@ def fetch_api_items(source):
         items = []
         total_count = 0
 
-        # 1) XML 응답 처리 (AED 및 인증 오류 메시지)
+        # 1) XML 응답 처리
         if raw_text.startswith("<"):
             try:
                 root = ET.fromstring(raw_text)
@@ -200,17 +200,17 @@ def fetch_api_items(source):
                 print(f"[{source['category']}] JSON 파싱 실패: {e} | 응답: {raw_text[:120]}")
                 break
 
-            # 재난안전데이터공유플랫폼 V2 구조: {"header": {...}, "totalCount": ..., "body": [...]}
             if "response" not in data and "header" in data:
                 header = data.get("header", {})
                 result_code = str(header.get("resultCode", ""))
                 if result_code and result_code != "00":
-                    print(f"[{source['category']}] API 응답 오류 ({result_code}): {header.get('resultMsg') or header.get('errorMsg')}")
+                    msg = header.get("resultMsg") or header.get("errorMsg")
+                    print(f"[{source['category']}] API 응답 오류 ({result_code}): {msg}")
+                    if result_code == "20":
+                        print(f"  -> 안내: safetydata.go.kr 신청현황의 '승인' 상태 및 요청URL({source['url']}) 일치 여부를 확인하세요.")
                     break
                 total_count = int(data.get("totalCount", 0))
                 items = data.get("body") or []
-
-            # 공공데이터포털 표준 구조: {"response": {"header": {...}, "body": {"items": ...}}}
             else:
                 header = data.get("response", {}).get("header", {})
                 result_code = str(header.get("resultCode", ""))
@@ -272,6 +272,15 @@ def fetch_api_items(source):
 
 
 def sync_to_tidb():
+    # 1단계: API 데이터를 먼저 모두 수집 (장시간 수집 중 DB 유휴 연결 끊김 방지)
+    all_fetched = []
+    for source in API_SOURCES:
+        print(f"▶ [{source['category']}] 공공데이터 수집 시작...")
+        api_items = fetch_api_items(source)
+        print(f"  수집 완료: {len(api_items)}건")
+        all_fetched.extend(api_items)
+
+    # 2단계: 수집 완료 후 TiDB에 새 연결을 열어 고속 벌크 저장
     conn = pymysql.connect(**DB_CONFIG)
     try:
         with conn.cursor() as cursor:
@@ -286,38 +295,32 @@ def sync_to_tidb():
             to_insert = []
             to_update = []
 
-            for source in API_SOURCES:
-                print(f"▶ [{source['category']}] 공공데이터 수집 시작...")
-                api_items = fetch_api_items(source)
-                print(f"  수집 완료: {len(api_items)}건")
+            for item in all_fetched:
+                key = (item["category"], item["name"], item["address"])
+                if key not in existing_map:
+                    to_insert.append((
+                        item["category"], item["name"], item["lat"], item["lng"], item["address"], "PENDING", ""
+                    ))
+                    existing_map[key] = True
+                else:
+                    old = existing_map[key]
+                    if isinstance(old, dict):
+                        if abs(float(old["lat"]) - item["lat"]) > 1e-5 or abs(float(old["lng"]) - item["lng"]) > 1e-5:
+                            to_update.append((item["lat"], item["lng"], old["id"]))
 
-                for item in api_items:
-                    key = (item["category"], item["name"], item["address"])
-                    if key not in existing_map:
-                        to_insert.append((
-                            item["category"], item["name"], item["lat"], item["lng"], item["address"]
-                        ))
-                        existing_map[key] = True
-                    else:
-                        old = existing_map[key]
-                        if isinstance(old, dict):
-                            if abs(float(old["lat"]) - item["lat"]) > 1e-5 or abs(float(old["lng"]) - item["lng"]) > 1e-5:
-                                to_update.append((item["lat"], item["lng"], old["id"]))
+            # PyMySQL 멀티-밸류 벌크 INSERT가 작동하도록 한 줄 SQL + 모든 컬럼 %s 바인딩 사용
+            insert_sql = f"INSERT INTO {TABLE_NAME} (category, name, lat, lng, address, status, note) VALUES (%s, %s, %s, %s, %s, %s, %s)"
+            for i in range(0, len(to_insert), 500):
+                conn.ping(reconnect=True)
+                cursor.executemany(insert_sql, to_insert[i:i + 500])
+                conn.commit()
 
-            if to_insert:
-                insert_sql = f"""
-                    INSERT INTO {TABLE_NAME} (category, name, lat, lng, address, status, note)
-                    VALUES (%s, %s, %s, %s, %s, 'PENDING', '')
-                """
-                for i in range(0, len(to_insert), 1000):
-                    cursor.executemany(insert_sql, to_insert[i:i + 1000])
+            update_sql = f"UPDATE {TABLE_NAME} SET lat = %s, lng = %s WHERE id = %s"
+            for i in range(0, len(to_update), 500):
+                conn.ping(reconnect=True)
+                cursor.executemany(update_sql, to_update[i:i + 500])
+                conn.commit()
 
-            if to_update:
-                update_sql = f"UPDATE {TABLE_NAME} SET lat = %s, lng = %s WHERE id = %s"
-                for i in range(0, len(to_update), 1000):
-                    cursor.executemany(update_sql, to_update[i:i + 1000])
-
-        conn.commit()
         print(f"✅ 동기화 완료! 신규 추가: {len(to_insert)}건 / 좌표 갱신: {len(to_update)}건")
     finally:
         conn.close()
