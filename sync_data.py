@@ -19,8 +19,12 @@ DB_CONFIG = {
 TABLE_NAME = "location_items"
 PUBLIC_DATA_KEY = os.getenv("PUBLIC_DATA_KEY", "")      # 공공데이터포털 인증키
 KAKAO_REST_KEY = os.getenv("KAKAO_REST_KEY", "")        # 카카오 디벨로퍼스 REST API 키
-COLD_SHELTER_KEY = os.getenv("COLD_SHELTER_KEY", "")    # 재난안전데이터공유플랫폼(한파쉼터) 키
-HEAT_SHELTER_KEY = os.getenv("HEAT_SHELTER_KEY", "")    # 재난안전데이터공유플랫폼(무더위쉼터) 키
+COLD_SHELTER_KEY = os.getenv("COLD_SHELTER_KEY", "")    # 한파쉼터 서비스키
+HEAT_SHELTER_KEY = os.getenv("HEAT_SHELTER_KEY", "")    # 무더위쉼터 서비스키
+
+# ※ safetydata.go.kr 마이페이지 -> 오픈API 신청현황의 요청주소(DSSP-IF-번호)와 일치해야 합니다.
+COLD_SHELTER_URL = "https://www.safetydata.go.kr/V2/api/DSSP-IF-10804"
+HEAT_SHELTER_URL = "https://www.safetydata.go.kr/V2/api/DSSP-IF-10942"
 
 API_SOURCES = [
     {
@@ -60,7 +64,7 @@ API_SOURCES = [
         "category": "한파쉼터",
         "platform": "safetydata",
         "service_key": COLD_SHELTER_KEY,
-        "url": "https://www.safetydata.go.kr/V2/api/DSSP-IF-10804",
+        "url": COLD_SHELTER_URL,
         "name_key": "RSTR_NM",
         "addr_key": "RN_DTL_ADRES",
         "fallback_addr_key": "DTL_ADRES",
@@ -71,7 +75,7 @@ API_SOURCES = [
         "category": "무더위쉼터",
         "platform": "safetydata",
         "service_key": HEAT_SHELTER_KEY,
-        "url": "https://www.safetydata.go.kr/V2/api/DSSP-IF-10942",
+        "url": HEAT_SHELTER_URL,
         "name_key": "RSTR_NM",
         "addr_key": "RN_DTL_ADRES",
         "fallback_addr_key": "DTL_ADRES",
@@ -93,7 +97,7 @@ def geocode_address(address: str, fallback_name: str = ""):
             "https://dapi.kakao.com/v2/local/search/address.json",
             headers=headers,
             params={"query": address},
-            timeout=5,
+            timeout=10,
         )
         docs = res.json().get("documents", [])
         if docs:
@@ -108,7 +112,7 @@ def geocode_address(address: str, fallback_name: str = ""):
                 "https://dapi.kakao.com/v2/local/search/keyword.json",
                 headers=headers,
                 params={"query": f"{region_hint} {fallback_name}".strip()},
-                timeout=5,
+                timeout=10,
             )
             docs = res.json().get("documents", [])
             if docs:
@@ -120,8 +124,8 @@ def geocode_address(address: str, fallback_name: str = ""):
 
 
 def fetch_api_items(source):
-    """data.go.kr 및 safetydata.go.kr 응답을 자동 판별하여 수집"""
-    raw_key = source.get("service_key", "")
+    """data.go.kr 및 safetydata.go.kr 응답을 자동 판별하여 수집 (타임아웃 60초 + 3회 재시도)"""
+    raw_key = source.get("service_key", "").strip()
     if not raw_key:
         print(f"  [{source['category']}] 서비스키가 비어 있어 건너뜁니다.")
         return []
@@ -147,11 +151,19 @@ def fetch_api_items(source):
                 "type": "json",
             }
 
-        try:
-            res = requests.get(source["url"], params=params, timeout=20)
-            raw_text = res.text.lstrip()
-        except Exception as e:
-            print(f"[{source['category']}] {page}페이지 네트워크 오류: {e}")
+        raw_text = None
+        res = None
+        for attempt in range(1, 4):
+            try:
+                res = requests.get(source["url"], params=params, timeout=60)
+                raw_text = res.text.lstrip()
+                break
+            except Exception as e:
+                print(f"[{source['category']}] {page}페이지 요청 지연 (시도 {attempt}/3): {e}")
+                time.sleep(3)
+
+        if raw_text is None:
+            print(f"[{source['category']}] {page}페이지 3회 재시도 실패로 중단합니다.")
             break
 
         items = []
@@ -254,7 +266,7 @@ def fetch_api_items(source):
             break
 
         page += 1
-        time.sleep(0.2)
+        time.sleep(0.3)
 
     return collected
 
