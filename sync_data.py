@@ -59,22 +59,22 @@ API_SOURCES = [
     {
         "category": "한파쉼터",
         "platform": "safetydata",
-        "service_key": HEAT_SHELTER_KEY,
+        "service_key": COLD_SHELTER_KEY,
         "url": "https://www.safetydata.go.kr/V2/api/DSSP-IF-10804",
-        "name_keys": ["RSTR_NM", "FCLTY_NM", "SHLT_NM", "COLD_RSTR_NM", "NM"],
-        "addr_keys": ["RN_DTL_ADRES", "RDNMADR", "DTL_ADRES", "LNMADR", "ADRES", "ADDR"],
-        "lat_keys": ["LA", "LAT", "YCRD", "WGS84_LA"],
-        "lng_keys": ["LO", "LOT", "LNG", "XCRD", "WGS84_LO"],
+        "name_keys": ["REARE_NM", "RSTR_NM", "FCLTY_NM", "SHLT_NM", "NM"],
+        "addr_keys": ["RONA_DADDR", "DADDR", "RN_DTL_ADRES", "RDNMADR", "LNMADR", "ADRES"],
+        "lat_keys": ["LAT", "LA", "YCRD", "WGS84_LA"],
+        "lng_keys": ["LOT", "LO", "LNG", "XCRD", "WGS84_LO"],
     },
     {
         "category": "무더위쉼터",
         "platform": "safetydata",
-        "service_key": COLD_SHELTER_KEY,
+        "service_key": HEAT_SHELTER_KEY,
         "url": "https://www.safetydata.go.kr/V2/api/DSSP-IF-10942",
-        "name_keys": ["RSTR_NM", "FCLTY_NM", "SHLT_NM", "HEAT_RSTR_NM", "NM"],
-        "addr_keys": ["RN_DTL_ADRES", "RDNMADR", "DTL_ADRES", "LNMADR", "ADRES", "ADDR"],
-        "lat_keys": ["LA", "LAT", "YCRD", "WGS84_LA"],
-        "lng_keys": ["LO", "LOT", "LNG", "XCRD", "WGS84_LO"],
+        "name_keys": ["REARE_NM", "RSTR_NM", "FCLTY_NM", "SHLT_NM", "NM"],
+        "addr_keys": ["RONA_DADDR", "DADDR", "RN_DTL_ADRES", "RDNMADR", "LNMADR", "ADRES"],
+        "lat_keys": ["LAT", "LA", "YCRD", "WGS84_LA"],
+        "lng_keys": ["LOT", "LO", "LNG", "XCRD", "WGS84_LO"],
     },
 ]
 
@@ -133,20 +133,25 @@ def fetch_api_items(source: dict):
     clean_key = urllib.parse.unquote(raw_key)
     collected = []
     page = 1
-    num_of_rows = 1000
+    is_safetydata = source["platform"] == "safetydata"
+    num_of_rows = 500 if is_safetydata else 1000
+    max_retries = 6 if is_safetydata else 3
     geocode_used = 0
     max_geocode_per_source = 300
 
+    session = requests.Session()
+    session.headers.update({"User-Agent": "Mozilla/5.0 (compatible; CapstoneMapBot/1.0)"})
+
     while True:
         data = None
-        for attempt in range(1, 4):
+        for attempt in range(1, max_retries + 1):
             try:
-                if source["platform"] == "safetydata":
+                if is_safetydata:
                     req_url = (
                         f"{source['url']}?serviceKey={raw_key}"
                         f"&returnType=json&pageNo={page}&numOfRows={num_of_rows}"
                     )
-                    res = requests.get(req_url, timeout=60)
+                    res = session.get(req_url, timeout=60)
                 else:
                     params = {
                         "serviceKey": clean_key,
@@ -154,18 +159,24 @@ def fetch_api_items(source: dict):
                         "numOfRows": num_of_rows,
                         "type": "json",
                     }
-                    res = requests.get(source["url"], params=params, timeout=60)
+                    res = session.get(source["url"], params=params, timeout=60)
+
+                text = res.text.strip()
+                if text.startswith("<"):
+                    print(f"[{category}] 일일 호출 한도 초과 또는 XML 오류 응답으로 건너뜁니다.")
+                    return collected
+
                 data = res.json()
                 break
             except Exception as e:
-                print(f"[{category}] {page}페이지 요청 지연 (시도 {attempt}/3): {e}")
-                time.sleep(2 * attempt)
+                print(f"[{category}] {page}페이지 요청 지연 (시도 {attempt}/{max_retries}): {e}")
+                time.sleep(min(2 * attempt, 10))
 
         if data is None:
-            print(f"[{category}] {page}페이지 3회 실패로 수집 중단")
+            print(f"[{category}] {page}페이지 재시도 실패로 현재까지 수집된 {len(collected)}건만 저장합니다.")
             break
 
-        if source["platform"] == "safetydata":
+        if is_safetydata:
             header = data.get("header", {})
             result_code = str(header.get("resultCode", ""))
             if result_code != "00":
@@ -192,11 +203,6 @@ def fetch_api_items(source: dict):
 
         if not items:
             break
-
-        if page == 1 and isinstance(items[0], dict):
-            test_name = pick_value(items[0], source["name_keys"])
-            if not test_name:
-                print(f"[{category}] 경고: 이름 키 매칭 실패! 실제 응답 키 목록: {list(items[0].keys())}")
 
         for row in items:
             if not isinstance(row, dict):
@@ -235,7 +241,7 @@ def fetch_api_items(source: dict):
             break
 
         page += 1
-        time.sleep(0.5 if source["platform"] == "safetydata" else 0.2)
+        time.sleep(0.4 if is_safetydata else 0.2)
 
     return collected
 
