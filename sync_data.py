@@ -17,12 +17,16 @@ DB_CONFIG = {
 }
 
 TABLE_NAME = "location_items"
-PUBLIC_DATA_KEY = os.getenv("PUBLIC_DATA_KEY", "")  # 공공데이터포털 인증키 (Encoding/Decoding 모두 자동 처리)
-KAKAO_REST_KEY = os.getenv("KAKAO_REST_KEY", "")    # 카카오 디벨로퍼스 REST API 키
+PUBLIC_DATA_KEY = os.getenv("PUBLIC_DATA_KEY", "")      # 공공데이터포털 인증키
+KAKAO_REST_KEY = os.getenv("KAKAO_REST_KEY", "")        # 카카오 디벨로퍼스 REST API 키
+COLD_SHELTER_KEY = os.getenv("COLD_SHELTER_KEY", "")    # 재난안전데이터공유플랫폼(한파쉼터) 키
+HEAT_SHELTER_KEY = os.getenv("HEAT_SHELTER_KEY", "")    # 재난안전데이터공유플랫폼(무더위쉼터) 키
 
 API_SOURCES = [
     {
         "category": "공중화장실",
+        "platform": "data_go_kr",
+        "service_key": PUBLIC_DATA_KEY,
         "url": "http://api.data.go.kr/openapi/tn_pubr_public_toilet_api",
         "name_key": "toiletNm",
         "addr_key": "rdnmadr",
@@ -32,6 +36,8 @@ API_SOURCES = [
     },
     {
         "category": "졸음쉼터",
+        "platform": "data_go_kr",
+        "service_key": PUBLIC_DATA_KEY,
         "url": "http://api.data.go.kr/openapi/tn_pubr_public_rest_area_api",
         "name_key": "restAreaNm",
         "addr_key": "rdnmadr",
@@ -41,12 +47,36 @@ API_SOURCES = [
     },
     {
         "category": "AED",
+        "platform": "data_go_kr",
+        "service_key": PUBLIC_DATA_KEY,
         "url": "http://apis.data.go.kr/B552657/AEDInfoInqireService/getAedFullDown",
         "name_key": "buildPlace",
         "addr_key": "buildAddress",
         "fallback_addr_key": "buildAddress",
         "lat_key": "wgs84Lat",
         "lng_key": "wgs84Lon",
+    },
+    {
+        "category": "한파쉼터",
+        "platform": "safetydata",
+        "service_key": COLD_SHELTER_KEY,
+        "url": "https://www.safetydata.go.kr/V2/api/DSSP-IF-10804",
+        "name_key": "RSTR_NM",
+        "addr_key": "RN_DTL_ADRES",
+        "fallback_addr_key": "DTL_ADRES",
+        "lat_key": "LA",
+        "lng_key": "LO",
+    },
+    {
+        "category": "무더위쉼터",
+        "platform": "safetydata",
+        "service_key": HEAT_SHELTER_KEY,
+        "url": "https://www.safetydata.go.kr/V2/api/DSSP-IF-10942",
+        "name_key": "RSTR_NM",
+        "addr_key": "RN_DTL_ADRES",
+        "fallback_addr_key": "DTL_ADRES",
+        "lat_key": "LA",
+        "lng_key": "LO",
     },
 ]
 
@@ -90,19 +120,33 @@ def geocode_address(address: str, fallback_name: str = ""):
 
 
 def fetch_api_items(source):
-    """공공데이터 API 응답이 XML이든 JSON이든 자동으로 파싱하여 수집"""
+    """data.go.kr 및 safetydata.go.kr 응답을 자동 판별하여 수집"""
+    raw_key = source.get("service_key", "")
+    if not raw_key:
+        print(f"  [{source['category']}] 서비스키가 비어 있어 건너뜁니다.")
+        return []
+
     collected = []
     page = 1
     num_of_rows = 1000
-    clean_key = unquote(PUBLIC_DATA_KEY)  # Encoding 키를 넣었더라도 이중 인코딩 방지
+    clean_key = unquote(raw_key)
 
     while True:
-        params = {
-            "serviceKey": clean_key,
-            "pageNo": page,
-            "numOfRows": num_of_rows,
-            "type": "json",
-        }
+        if source.get("platform") == "safetydata":
+            params = {
+                "serviceKey": clean_key,
+                "pageNo": page,
+                "numOfRows": num_of_rows,
+                "returnType": "json",
+            }
+        else:
+            params = {
+                "serviceKey": clean_key,
+                "pageNo": page,
+                "numOfRows": num_of_rows,
+                "type": "json",
+            }
+
         try:
             res = requests.get(source["url"], params=params, timeout=20)
             raw_text = res.text.lstrip()
@@ -113,7 +157,7 @@ def fetch_api_items(source):
         items = []
         total_count = 0
 
-        # 1) 응답이 XML인 경우 (AED API 및 공공데이터 게이트웨이 인증 오류)
+        # 1) XML 응답 처리 (AED 및 인증 오류 메시지)
         if raw_text.startswith("<"):
             try:
                 root = ET.fromstring(raw_text)
@@ -136,35 +180,52 @@ def fetch_api_items(source):
             for item_el in root.findall(".//item"):
                 items.append({child.tag: (child.text or "").strip() for child in item_el})
 
-        # 2) 응답이 JSON인 경우 (공중화장실, 졸음쉼터 등 표준데이터)
+        # 2) JSON 응답 처리
         else:
             try:
                 data = res.json()
             except Exception as e:
-                print(f"[{source['category']}] JSON 파싱 실패: {e} | 응답 미리보기: {raw_text[:120]}")
+                print(f"[{source['category']}] JSON 파싱 실패: {e} | 응답: {raw_text[:120]}")
                 break
 
-            header = data.get("response", {}).get("header", {})
-            result_code = str(header.get("resultCode", ""))
-            if result_code and result_code != "00":
-                print(f"[{source['category']}] API 응답 오류 ({result_code}): {header.get('resultMsg')}")
-                break
+            # 재난안전데이터공유플랫폼 V2 구조: {"header": {...}, "totalCount": ..., "body": [...]}
+            if "response" not in data and "header" in data:
+                header = data.get("header", {})
+                result_code = str(header.get("resultCode", ""))
+                if result_code and result_code != "00":
+                    print(f"[{source['category']}] API 응답 오류 ({result_code}): {header.get('resultMsg') or header.get('errorMsg')}")
+                    break
+                total_count = int(data.get("totalCount", 0))
+                items = data.get("body") or []
 
-            body = data.get("response", {}).get("body", {})
-            total_count = int(body.get("totalCount", 0))
-            raw_items = body.get("items", [])
-            if isinstance(raw_items, dict):
-                raw_items = raw_items.get("item", [])
-            if isinstance(raw_items, dict):
-                raw_items = [raw_items]
-            items = raw_items
+            # 공공데이터포털 표준 구조: {"response": {"header": {...}, "body": {"items": ...}}}
+            else:
+                header = data.get("response", {}).get("header", {})
+                result_code = str(header.get("resultCode", ""))
+                if result_code and result_code != "00":
+                    print(f"[{source['category']}] API 응답 오류 ({result_code}): {header.get('resultMsg')}")
+                    break
+
+                body = data.get("response", {}).get("body", {})
+                total_count = int(body.get("totalCount", 0))
+                raw_items = body.get("items", [])
+                if isinstance(raw_items, dict):
+                    raw_items = raw_items.get("item", [])
+                if isinstance(raw_items, dict):
+                    raw_items = [raw_items]
+                items = raw_items
 
         if not items:
             break
 
         for row in items:
             name = str(row.get(source["name_key"]) or "").strip()
-            addr = str(row.get(source["addr_key"]) or row.get(source["fallback_addr_key"]) or "").strip()
+            addr = str(
+                row.get(source["addr_key"])
+                or row.get(source["fallback_addr_key"])
+                or row.get("ADRES")
+                or ""
+            ).strip()
             if not name:
                 continue
 
@@ -199,9 +260,6 @@ def fetch_api_items(source):
 
 
 def sync_to_tidb():
-    if not PUBLIC_DATA_KEY:
-        raise RuntimeError("PUBLIC_DATA_KEY 환경변수가 설정되지 않았습니다.")
-
     conn = pymysql.connect(**DB_CONFIG)
     try:
         with conn.cursor() as cursor:
