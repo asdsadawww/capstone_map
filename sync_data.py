@@ -60,7 +60,7 @@ API_SOURCES = [
     {
         "category": "한파쉼터",
         "platform": "safetydata",
-        "service_key": COLD_SHELTER_KEY,
+        "service_key": HEAT_SHELTER_KEY,
         "url": "https://www.safetydata.go.kr/V2/api/DSSP-IF-10804",
         "name_keys": ["REARE_NM", "RSTR_NM", "FCLTY_NM", "SHLT_NM", "NM"],
         "addr_keys": ["RONA_DADDR", "DADDR", "RN_DTL_ADRES", "RDNMADR", "LNMADR", "ADRES"],
@@ -70,7 +70,7 @@ API_SOURCES = [
     {
         "category": "무더위쉼터",
         "platform": "safetydata",
-        "service_key": HEAT_SHELTER_KEY,
+        "service_key": COLD_SHELTER_KEY,
         "url": "https://www.safetydata.go.kr/V2/api/DSSP-IF-10942",
         "name_keys": ["REARE_NM", "RSTR_NM", "FCLTY_NM", "SHLT_NM", "NM"],
         "addr_keys": ["RONA_DADDR", "DADDR", "RN_DTL_ADRES", "RDNMADR", "LNMADR", "ADRES"],
