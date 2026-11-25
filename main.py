@@ -254,6 +254,7 @@ def get_nearest_facility(
                             "steps": steps,
                             "is_fallback": False
                         }
+                        break
 
                 # 2) 도보 또는 자동차 경로 계산
                 else:
