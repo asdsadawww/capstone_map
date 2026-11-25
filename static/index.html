@@ -158,6 +158,10 @@
 
     <!-- 이동수단 선택 및 단계별 경로 안내 박스 -->
     <div id="routeGuideBox" style="display:none; flex-direction:column; gap:6px; background:#f8fafc; padding:10px; border-radius:8px; border:1px solid #e2e8f0;">
+      <div style="display:flex; justify-content:space-between; align-items:center;">
+        <span style="font-size:11px; font-weight:700; color:#475569;">경로 안내 ON</span>
+        <button class="btn btn-outline" style="padding:3px 8px; font-size:11px;" onclick="clearRouteGuide()">경로 끄기</button>
+      </div>
       <div style="display:grid; grid-template-columns:repeat(3,1fr); gap:4px;">
         <button class="btn btn-outline mode-btn" data-mode="walk" onclick="switchRouteMode('walk')">🚶 도보</button>
         <button class="btn btn-outline mode-btn" data-mode="transit" onclick="switchRouteMode('transit')">🚌 대중교통</button>
@@ -225,6 +229,12 @@
     let isAddMode = false;
     let pendingLatLng = null;
     let fetchTimer = null;
+
+    let routePolyline = null;
+    let myLocationOverlay = null;
+    let gpsWatchId = null;
+    let lastMyCoords = null;
+    let lastTargetCategory = null;
 
     // 1. 지도 초기화
     window.onload = function () {
@@ -348,6 +358,7 @@
 
     // 7. 상세 검수 패널 열기 및 저장
     function openDetail(item) {
+      clearRouteGuide(true);
       selectedItem = item;
       document.getElementById("dCategory").innerText = item.category || "기타";
       document.getElementById("dName").innerText = item.name;
@@ -362,6 +373,27 @@
     function closeDetail() {
       document.getElementById("detailPanel").classList.remove("open");
       selectedItem = null;
+    }
+
+    function clearRouteGuide(stopGps = true) {
+      if (routePolyline) {
+        routePolyline.setMap(null);
+        routePolyline = null;
+      }
+      document.getElementById("routeGuideBox").style.display = "none";
+      document.getElementById("routeSteps").innerHTML = "";
+      lastTargetCategory = null;
+
+      if (stopGps) {
+        if (gpsWatchId !== null && navigator.geolocation) {
+          navigator.geolocation.clearWatch(gpsWatchId);
+          gpsWatchId = null;
+        }
+        if (myLocationOverlay) {
+          myLocationOverlay.setMap(null);
+          myLocationOverlay = null;
+        }
+      }
     }
 
     function setDetailStatus(st) {
@@ -426,11 +458,6 @@
         alert("등록 실패");
       }
     }
-    let routePolyline = null;
-    let myLocationOverlay = null;
-    let gpsWatchId = null;
-    let lastMyCoords = null;
-    let lastTargetCategory = null;
 
     function startLiveGpsTracking() {
       if (gpsWatchId !== null || !navigator.geolocation) return;
