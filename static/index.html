@@ -158,6 +158,10 @@
 
     <!-- 이동수단 선택 및 단계별 경로 안내 박스 -->
     <div id="routeGuideBox" style="display:none; flex-direction:column; gap:6px; background:#f8fafc; padding:10px; border-radius:8px; border:1px solid #e2e8f0;">
+      <div style="display:flex; justify-content:space-between; align-items:center;">
+        <span style="font-size:11px; font-weight:700; color:#475569;">경로 선 표시</span>
+        <button class="btn btn-dark" id="lineToggleBtn" style="padding:3px 9px; font-size:11px;" onclick="toggleRouteLine()">경로 선 OFF</button>
+      </div>
       <div style="display:grid; grid-template-columns:repeat(3,1fr); gap:4px;">
         <button class="btn btn-outline mode-btn" data-mode="walk" onclick="switchRouteMode('walk')">🚶 도보</button>
         <button class="btn btn-outline mode-btn" data-mode="transit" onclick="switchRouteMode('transit')">🚌 대중교통</button>
@@ -427,6 +431,22 @@
       }
     }
     let routePolyline = null;
+    let routeLineVisible = true;
+
+    function updateLineToggleButton() {
+      const btn = document.getElementById("lineToggleBtn");
+      if (!btn) return;
+      btn.innerText = routeLineVisible ? "경로 선 OFF" : "경로 선 ON";
+      btn.style.background = routeLineVisible ? "#1e293b" : "#2563eb";
+      btn.style.color = "#fff";
+    }
+
+    function toggleRouteLine() {
+      if (!routePolyline) return;
+      routeLineVisible = !routeLineVisible;
+      routePolyline.setMap(routeLineVisible ? map : null);
+      updateLineToggleButton();
+    }
     let myLocationOverlay = null;
     let gpsWatchId = null;
     let lastMyCoords = null;
@@ -492,6 +512,8 @@
 
       // 경로선 색상 분기 (차량: 파랑, 대중교통: 초록, 도보: 빨강)
       if (routePolyline) routePolyline.setMap(null);
+      routeLineVisible = true;
+      updateLineToggleButton();
       const colorMap = { car: "#2563eb", transit: "#16a34a", walk: "#ef4444" };
       const linePath = result.path.map(p => new kakao.maps.LatLng(p.lat, p.lng));
 
