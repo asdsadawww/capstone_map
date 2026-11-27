@@ -211,6 +211,12 @@
       <div style="display:flex; gap:8px; margin-top:4px;">
         <button class="btn btn-outline" style="flex:1" onclick="closeCreateModal()">취소</button>
         <button class="btn btn-primary" style="flex:1" onclick="submitCreate()">등록하기</button>
+        <select class="status-select" id="statusFilter" onchange="fetchLocations()">
+        <option value="ALL">전체 상태</option>
+        <option value="PENDING">미검수 (PENDING)</option>
+        <option value="VERIFIED">검수완료 (VERIFIED)</option>
+        <option value="INVALID">불일치/폐쇄 (INVALID)</option>
+      </select>
       </div>
     </div>
   </div>
