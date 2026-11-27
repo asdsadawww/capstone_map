@@ -302,12 +302,95 @@
     }
 
     // 3. 마커 및 클러스터 렌더링
+  // 3. 카테고리별 커스텀 핀 이미지 캐시 및 마커 렌더링
+    const CATEGORY_PIN_SVG = {
+      "공중화장실": `<svg xmlns="http://www.w3.org/2000/svg" width="36" height="46" viewBox="0 0 36 46">
+        <path d="M18 1.5C8.9 1.5 1.5 8.9 1.5 18c0 12.2 16.5 26.5 16.5 26.5S34.5 30.2 34.5 18C34.5 8.9 27.1 1.5 18 1.5z" fill="#2563eb" stroke="#fff" stroke-width="2"/>
+        <circle cx="18" cy="17.5" r="10.8" fill="#fff"/>
+        <circle cx="12.6" cy="12.2" r="1.8" fill="#1e293b"/>
+        <polygon points="9.6,15.0 15.6,15.0 12.6,23.2" fill="#1e293b"/>
+        <rect x="17.3" y="10.8" width="1.4" height="13.4" rx="0.7" fill="#1e293b"/>
+        <circle cx="23.4" cy="12.2" r="1.8" fill="#1e293b"/>
+        <polygon points="23.4,15.0 20.4,23.2 26.4,23.2" fill="#1e293b"/>
+      </svg>`,
+      "AED": `<svg xmlns="http://www.w3.org/2000/svg" width="36" height="46" viewBox="0 0 36 46">
+        <path d="M18 1.5C8.9 1.5 1.5 8.9 1.5 18c0 12.2 16.5 26.5 16.5 26.5S34.5 30.2 34.5 18C34.5 8.9 27.1 1.5 18 1.5z" fill="#dc2626" stroke="#fff" stroke-width="2"/>
+        <circle cx="18" cy="17.5" r="10.8" fill="#fff"/>
+        <rect x="15.6" y="11.5" width="4.8" height="12" rx="1" fill="#dc2626"/>
+        <rect x="12" y="15.1" width="12" height="4.8" rx="1" fill="#dc2626"/>
+      </svg>`,
+      "졸음쉼터": `<svg xmlns="http://www.w3.org/2000/svg" width="48" height="58" viewBox="0 0 48 58">
+        <defs>
+          <radialGradient id="drowsyGlow" cx="50%" cy="50%" r="50%">
+            <stop offset="0%" stop-color="#facc15" stop-opacity="0.92"/>
+            <stop offset="55%" stop-color="#fde047" stop-opacity="0.45"/>
+            <stop offset="100%" stop-color="#fde047" stop-opacity="0"/>
+          </radialGradient>
+        </defs>
+        <circle cx="24" cy="28" r="23" fill="url(#drowsyGlow)"/>
+        <path d="M24 7.5C14.9 7.5 7.5 14.9 7.5 24c0 12.2 16.5 26.5 16.5 26.5S40.5 36.2 40.5 24C40.5 14.9 33.1 7.5 24 7.5z" fill="#16a34a" stroke="#facc15" stroke-width="2.2"/>
+        <circle cx="24" cy="23.5" r="10.8" fill="#fff"/>
+        <path d="M26.4 18.2a5.8 5.8 0 1 0 2.7 10.5 4.9 4.9 0 0 1-2.7-10.5z" fill="#16a34a"/>
+      </svg>`,
+      "한파쉼터": `<svg xmlns="http://www.w3.org/2000/svg" width="36" height="46" viewBox="0 0 36 46">
+        <path d="M18 1.5C8.9 1.5 1.5 8.9 1.5 18c0 12.2 16.5 26.5 16.5 26.5S34.5 30.2 34.5 18C34.5 8.9 27.1 1.5 18 1.5z" fill="#0284c7" stroke="#fff" stroke-width="2"/>
+        <circle cx="18" cy="17.5" r="10.8" fill="#fff"/>
+        <line x1="18" y1="10.8" x2="18" y2="24.2" stroke="#0284c7" stroke-width="1.9" stroke-linecap="round"/>
+        <line x1="12.2" y1="14.15" x2="23.8" y2="20.85" stroke="#0284c7" stroke-width="1.9" stroke-linecap="round"/>
+        <line x1="23.8" y1="14.15" x2="12.2" y2="20.85" stroke="#0284c7" stroke-width="1.9" stroke-linecap="round"/>
+        <line x1="16.2" y1="12.3" x2="18" y2="14.1" stroke="#0284c7" stroke-width="1.5" stroke-linecap="round"/>
+        <line x1="19.8" y1="12.3" x2="18" y2="14.1" stroke="#0284c7" stroke-width="1.5" stroke-linecap="round"/>
+        <line x1="16.2" y1="22.7" x2="18" y2="20.9" stroke="#0284c7" stroke-width="1.5" stroke-linecap="round"/>
+        <line x1="19.8" y1="22.7" x2="18" y2="20.9" stroke="#0284c7" stroke-width="1.5" stroke-linecap="round"/>
+        <line x1="13.5" y1="12.8" x2="14.5" y2="15.5" stroke="#0284c7" stroke-width="1.5" stroke-linecap="round"/>
+        <line x1="12.0" y1="16.2" x2="14.5" y2="15.5" stroke="#0284c7" stroke-width="1.5" stroke-linecap="round"/>
+        <line x1="22.5" y1="12.8" x2="21.5" y2="15.5" stroke="#0284c7" stroke-width="1.5" stroke-linecap="round"/>
+        <line x1="24.0" y1="16.2" x2="21.5" y2="15.5" stroke="#0284c7" stroke-width="1.5" stroke-linecap="round"/>
+        <line x1="13.5" y1="22.2" x2="14.5" y2="19.5" stroke="#0284c7" stroke-width="1.5" stroke-linecap="round"/>
+        <line x1="12.0" y1="18.8" x2="14.5" y2="19.5" stroke="#0284c7" stroke-width="1.5" stroke-linecap="round"/>
+        <line x1="22.5" y1="22.2" x2="21.5" y2="19.5" stroke="#0284c7" stroke-width="1.5" stroke-linecap="round"/>
+        <line x1="24.0" y1="18.8" x2="21.5" y2="19.5" stroke="#0284c7" stroke-width="1.5" stroke-linecap="round"/>
+      </svg>`,
+      "무더위쉼터": `<svg xmlns="http://www.w3.org/2000/svg" width="36" height="46" viewBox="0 0 36 46">
+        <path d="M18 1.5C8.9 1.5 1.5 8.9 1.5 18c0 12.2 16.5 26.5 16.5 26.5S34.5 30.2 34.5 18C34.5 8.9 27.1 1.5 18 1.5z" fill="#ea580c" stroke="#fff" stroke-width="2"/>
+        <circle cx="18" cy="17.5" r="10.8" fill="#fff"/>
+        <circle cx="18" cy="17.5" r="3.6" fill="#ea580c"/>
+        <line x1="18" y1="11.2" x2="18" y2="13" stroke="#ea580c" stroke-width="1.8" stroke-linecap="round"/>
+        <line x1="18" y1="22" x2="18" y2="23.8" stroke="#ea580c" stroke-width="1.8" stroke-linecap="round"/>
+        <line x1="11.7" y1="17.5" x2="13.5" y2="17.5" stroke="#ea580c" stroke-width="1.8" stroke-linecap="round"/>
+        <line x1="22.5" y1="17.5" x2="24.3" y2="17.5" stroke="#ea580c" stroke-width="1.8" stroke-linecap="round"/>
+        <line x1="13.5" y1="13" x2="14.8" y2="14.3" stroke="#ea580c" stroke-width="1.8" stroke-linecap="round"/>
+        <line x1="21.2" y1="20.7" x2="22.5" y2="22" stroke="#ea580c" stroke-width="1.8" stroke-linecap="round"/>
+        <line x1="22.5" y1="13" x2="21.2" y2="14.3" stroke="#ea580c" stroke-width="1.8" stroke-linecap="round"/>
+        <line x1="14.8" y1="20.7" x2="13.5" y2="22" stroke="#ea580c" stroke-width="1.8" stroke-linecap="round"/>
+      </svg>`
+    };
+
+    const markerImageCache = {};
+
+    function getCategoryMarkerImage(category) {
+      const key = CATEGORY_PIN_SVG[category] ? category : "공중화장실";
+      if (markerImageCache[key]) return markerImageCache[key];
+
+      const isDrowsy = key === "졸음쉼터";
+      const svgUrl = "data:image/svg+xml;charset=utf-8," + encodeURIComponent(CATEGORY_PIN_SVG[key]);
+      const imageSize = isDrowsy ? new kakao.maps.Size(48, 58) : new kakao.maps.Size(36, 46);
+      const imageOption = isDrowsy
+        ? { offset: new kakao.maps.Point(24, 52) }
+        : { offset: new kakao.maps.Point(18, 46) };
+
+      const markerImage = new kakao.maps.MarkerImage(svgUrl, imageSize, imageOption);
+      markerImageCache[key] = markerImage;
+      return markerImage;
+    }
+
     function renderMarkers(items) {
       clusterer.clear();
       const markers = items.map(item => {
         const marker = new kakao.maps.Marker({
           position: new kakao.maps.LatLng(item.lat, item.lng),
-          title: item.name
+          title: item.name,
+          image: getCategoryMarkerImage(item.category)
         });
         kakao.maps.event.addListener(marker, "click", () => openDetail(item));
         return marker;
