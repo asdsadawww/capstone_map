@@ -108,7 +108,7 @@
   <div class="topbar">
     <div class="topbar-row">
       <div class="brand">
-        📍 공공안전·편의시설 맵
+         공공안전·편의시설 맵
         <span class="badge-count" id="countBadge">로딩 중...</span>
       </div>
       <div class="search-box">
@@ -123,7 +123,7 @@
 
     <div class="filter-row">
       <div class="chips" id="categoryChips">
-        <button class="btn" style="background:#ef4444; color:#fff;" onclick="findNearestFacility()">🚨 가까운 시설</button>
+        <button class="btn" style="background:#ef4444; color:#fff;" onclick="findNearestFacility()"> 가까운 시설</button>
         <button class="chip active" data-cat="ALL" onclick="selectCategory(this)">전체</button>
         <button class="chip" data-cat="공중화장실" onclick="selectCategory(this)">공중화장실</button>
         <button class="chip" data-cat="AED" onclick="selectCategory(this)">AED</button>
@@ -163,9 +163,9 @@
         <button class="btn btn-dark" id="lineToggleBtn" style="padding:3px 9px; font-size:11px;" onclick="toggleRouteLine()">경로 선 OFF</button>
       </div>
       <div style="display:grid; grid-template-columns:repeat(3,1fr); gap:4px;">
-        <button class="btn btn-outline mode-btn" data-mode="walk" onclick="switchRouteMode('walk')">🚶 도보</button>
-        <button class="btn btn-outline mode-btn" data-mode="transit" onclick="switchRouteMode('transit')">🚌 대중교통</button>
-        <button class="btn btn-outline mode-btn" data-mode="car" onclick="switchRouteMode('car')">🚗 차량</button>
+        <button class="btn btn-outline mode-btn" data-mode="walk" onclick="switchRouteMode('walk')"> 도보</button>
+        <button class="btn btn-outline mode-btn" data-mode="transit" onclick="switchRouteMode('transit')"> 대중교통</button>
+        <button class="btn btn-outline mode-btn" data-mode="car" onclick="switchRouteMode('car')"> 차량</button>
       </div>
       <div id="routeSteps" style="max-height:110px; overflow-y:auto; font-size:12px; color:#334155; line-height:1.5;"></div>
     </div>
@@ -539,7 +539,7 @@
 
       openDetail(result.target);
       document.getElementById("dAddress").innerText =
-        `🚨 최단 ${modeNames[result.mode]} ${distText} (약 ${minutes}분) · ${result.target.address}`;
+        ` 최단 ${modeNames[result.mode]} ${distText} (약 ${minutes}분) · ${result.target.address}`;
 
       // 이동수단 탭 활성화 및 턴바이턴 안내 문구 표시
       const guideBox = document.getElementById("routeGuideBox");
